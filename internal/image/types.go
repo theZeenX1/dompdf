@@ -1,0 +1,35 @@
+package image
+
+import (
+	"github.com/theZeenX1/dompdf/internal/colors"
+	"github.com/theZeenX1/dompdf/internal/pdf"
+)
+
+type Image interface {
+	Details() *ImageDetails
+
+	// stream objects for PDF
+	//
+	// if alpha != nil, per pixel alpha is to be stored in a new object
+	// i.e., two objects, one with pixel data and one with alpha data
+	// (read more: pdf 1.7 spec -> 11.6.5 Transparency)
+	ToStream() ([]*pdf.StreamObj, []*pdf.Ref, error)
+}
+
+type ImageDetails struct {
+	Width, Height    int
+	Type             ImageType
+	ColorSpace       colors.ColorSpace
+	BitsPerComponent int
+	Data             []byte
+	// if alpha is present, ToStream outputs two objects
+	Alpha []byte
+}
+
+func (d *ImageDetails) Details() *ImageDetails {
+	return d
+}
+
+func (d *ImageDetails) ToStream() ([]*pdf.StreamObj, []*pdf.Ref, error) {
+	return nil, nil, nil
+}
