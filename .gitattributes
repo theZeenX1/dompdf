@@ -1,0 +1,2 @@
+# ignore scripts and subsequent files while downloading package
+internal/fonts/scripts export-ignore

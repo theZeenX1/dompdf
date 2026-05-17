@@ -1,5 +1,21 @@
 package dom
 
+type MeasurementType int16
+
+const (
+	Pt MeasurementType = iota
+	Percentage
+)
+
+type BorderStyle int16
+
+const (
+	Solid BorderStyle = iota
+	Dashed
+	Dotted
+	Double
+)
+
 type FlexDirection int16
 
 const (
@@ -28,4 +44,12 @@ const (
 	JustifySpaceBetween
 	JustifySpaceAround
 	JustifySpaceEvenly
+)
+
+type TextAlign int16
+
+const (
+	TextAlignStart TextAlign = iota
+	TextAlignEnd
+	TextAlignCenter
 )

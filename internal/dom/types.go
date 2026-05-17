@@ -8,13 +8,16 @@ import (
 )
 
 type DOMElement interface {
-	// Justify itself in the page
+	// justify itself in the page and set the coordinates, height, etc.
 	Layout(ctx LayoutContext)
+	//
+	NodePointers() *NodePointers
+	//
+	Style() *Style
 }
 
 type DOMNode interface {
-	//
-	Layout(ctx LayoutContext)
+	DOMElement
 	// create stream objects from the given dom node
 	ToStream() ([]*pdf.StreamObj, []*pdf.Ref, error)
 }
@@ -43,28 +46,52 @@ type LayoutContext struct {
 type ElementBorder struct {
 	LBorder, RBorder, TBorder, BBorder float64
 	Thickness                          float64
+	BorderRadiusType                   MeasurementType
+	BorderRadius                       float64
+	BorderStyle                        BorderStyle
 	Color                              colors.Color
 }
 
-// Element detail:
-type ElementLayoutDetail struct {
-	NodeId   int
-	Position BoxCoordinates
-	ZIndex   int
+// Commons:
+type NodePointers struct {
+	nodeId       int
+	parentNodeId int
+	nextNodeId   int
+	prevNodeId   int
+}
+
+type Style struct {
+	Position        BoxCoordinates
+	Height, Width   float64
+	Padding, Margin BoxCoordinates
+	ZIndex          int
+	BgColor         colors.Color
+	Border          ElementBorder
+	Color           colors.Color
+	Font            *fonts.RegisteredFont
+	FontSize        float64
+	FontStyle       fonts.FontStyle
+	FontWeight      fonts.FontWeight
+}
+
+type LayoutBox struct {
+	X, Y          float64
+	Width, Height float64
 }
 
 // DOMElements:
 type Container struct {
-	ElementLayoutDetail
+	LayoutBox
+	NodePointers
+	Style
 
-	Padding BoxCoordinates
-	Margin  BoxCoordinates
-	BgColor colors.Color
-	Child   *DOMElement
+	Child *DOMElement
 }
 
 type FlexItem struct {
-	ElementLayoutDetail
+	LayoutBox
+	NodePointers
+	Style
 
 	AlignSelf   Align
 	JustifySelf Justify
@@ -72,7 +99,9 @@ type FlexItem struct {
 }
 
 type Flex struct {
-	ElementLayoutDetail
+	LayoutBox
+	NodePointers
+	Style
 
 	FlexDirection  FlexDirection
 	Gap            float64
@@ -81,33 +110,89 @@ type Flex struct {
 	Children       []*FlexItem
 }
 
-type Grid struct {
-	ElementLayoutDetail
+// auto flows nodes from one "pipe" to the next.
+type AutoFlow struct {
+	LayoutBox
+	NodePointers
+	Style
+
+	FlowDirection  FlexDirection
+	PipeCount      int16
+	Gap            float64
+	AlignItems     Align
+	JustifyContent Justify
+	Children       []*FlexItem
 }
 
 type Table struct {
-	ElementLayoutDetail
+	LayoutBox
+	NodePointers
+	Style
+
+	Columns []*TableColumn
+	Rows    []*TableRow
+
+	BorderCollapse bool
+	CellSpacing    float64
 }
 
-// DOMNodes:
-type TextNode struct {
-	ElementLayoutDetail
+type TableColumn struct {
+	Width float64
+}
 
-	Text      string
-	Color     colors.Color
-	Font      *fonts.Font
-	FontStyle fonts.FontStyle
+type TableRow struct {
+	Height float64
+	Cells  []*TableCell
+}
+
+type TableCell struct {
+	LayoutBox
+	NodePointers
+	Style
+
+	ColSpan int
+	RowSpan int
+
+	Child DOMElement
+}
+
+// DOM Node elements
+
+type TextNode struct {
+	LayoutBox
+	NodePointers
+	Style
+
+	Text string
+}
+
+type ParagraphNode struct {
+	LayoutBox
+	NodePointers
+	Style
+
+	TextAlign   TextAlign
+	LineHeight  float64
+	TextIndent  float64
+	WordWrap    bool
+	Hyphenation bool
+
+	Inlines []DOMElement
 }
 
 type AnnotationNode struct {
-	ElementLayoutDetail
+	LayoutBox
+	NodePointers
+	Style
 
 	TextNode TextNode
 	Href     string
 }
 
 type ImageNode struct {
-	ElementLayoutDetail
+	LayoutBox
+	NodePointers
+	Style
 
 	Details image.Image
 }
