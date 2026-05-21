@@ -95,9 +95,9 @@ type LayoutBox struct {
 
 // DOMElements:
 type Container struct {
-	LayoutBox
-	NodePointers
-	Style
+	layoutBox    LayoutBox
+	nodePointers NodePointers
+	style        Style
 
 	Child DOMElement
 }
@@ -105,9 +105,9 @@ type Container struct {
 func (c *Container) block() {}
 
 type FlexItem struct {
-	LayoutBox
-	NodePointers
-	Style
+	layoutBox    LayoutBox
+	nodePointers NodePointers
+	style        Style
 
 	AlignSelf   Align
 	JustifySelf Justify
@@ -115,9 +115,9 @@ type FlexItem struct {
 }
 
 type Flex struct {
-	LayoutBox
-	NodePointers
-	Style
+	layoutBox    LayoutBox
+	nodePointers NodePointers
+	style        Style
 
 	FlexDirection  FlexDirection
 	Gap            float64
@@ -130,9 +130,9 @@ func (f *Flex) block() {}
 
 // auto flows nodes from one "pipe" to the next.
 type AutoFlow struct {
-	LayoutBox
-	NodePointers
-	Style
+	layoutBox    LayoutBox
+	nodePointers NodePointers
+	style        Style
 
 	FlowDirection  FlexDirection
 	PipeCount      int16
@@ -145,9 +145,9 @@ type AutoFlow struct {
 func (a *AutoFlow) block() {}
 
 type Table struct {
-	LayoutBox
-	NodePointers
-	Style
+	layoutBox    LayoutBox
+	nodePointers NodePointers
+	style        Style
 
 	Columns []TableColumn
 	Rows    []TableRow
@@ -168,9 +168,9 @@ type TableRow struct {
 }
 
 type TableCell struct {
-	LayoutBox
-	NodePointers
-	Style
+	layoutBox    LayoutBox
+	nodePointers NodePointers
+	style        Style
 
 	ColSpan int
 	RowSpan int
@@ -178,12 +178,10 @@ type TableCell struct {
 	Child DOMElement
 }
 
-// Render Nodes:
-
 type ParagraphNode struct {
-	LayoutBox
-	NodePointers
-	Style
+	layoutBox    LayoutBox
+	nodePointers NodePointers
+	style        Style
 
 	TextAlign   TextAlign
 	LineHeight  float64
@@ -196,35 +194,46 @@ type ParagraphNode struct {
 
 func (p *ParagraphNode) block() {}
 
+// Render Nodes:
 type TextNode struct {
-	LayoutBox
-	NodePointers
-	Style
+	layoutBox    LayoutBox
+	nodePointers NodePointers
+	style        Style
 
 	Text string
 }
 
-func (t TextNode) Layout(ctx LayoutContext) {}
-func (t TextNode) NodePointers()            { return &t.NodePointers() }
-func (t TextNode) inline()                  {}
+func (t TextNode) Layout(ctx LayoutContext)                        {}
+func (t TextNode) NodePointers() *NodePointers                     { return &t.nodePointers }
+func (t TextNode) Style() *Style                                   { return &t.style }
+func (t TextNode) ToStream() ([]*pdf.StreamObj, []*pdf.Ref, error) { return nil, nil, nil }
+func (t TextNode) inline()                                         {}
 
 type AnnotationNode struct {
-	LayoutBox
-	NodePointers
-	Style
+	layoutBox    LayoutBox
+	nodePointers NodePointers
+	style        Style
 
 	TextNode TextNode
 	Href     string
 }
 
-func (a *AnnotationNode) inline() {}
+func (a AnnotationNode) Layout(ctx LayoutContext)                        {}
+func (a AnnotationNode) NodePointers() *NodePointers                     { return &a.nodePointers }
+func (a AnnotationNode) Style() *Style                                   { return &a.style }
+func (a AnnotationNode) ToStream() ([]*pdf.StreamObj, []*pdf.Ref, error) { return nil, nil, nil }
+func (a AnnotationNode) inline()                                         {}
 
 type ImageNode struct {
-	LayoutBox
-	NodePointers
-	Style
+	layoutBox    LayoutBox
+	nodePointers NodePointers
+	style        Style
 
 	Details image.Image
 }
 
-func (i *ImageNode) inline() {}
+func (i ImageNode) Layout(ctx LayoutContext)                        {}
+func (i ImageNode) NodePointers() *NodePointers                     { return &i.nodePointers }
+func (i ImageNode) Style() *Style                                   { return &i.style }
+func (i ImageNode) ToStream() ([]*pdf.StreamObj, []*pdf.Ref, error) { return nil, nil, nil }
+func (i ImageNode) inline()                                         {}
