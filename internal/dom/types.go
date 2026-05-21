@@ -16,10 +16,24 @@ type DOMElement interface {
 	Style() *Style
 }
 
-type DOMNode interface {
+type RendderNode interface {
 	DOMElement
 	// create stream objects from the given dom node
 	ToStream() ([]*pdf.StreamObj, []*pdf.Ref, error)
+}
+
+// block component
+type BlockElement interface {
+	DOMElement
+	//
+	block()
+}
+
+// inline component (is also a render node)
+type InlineElement interface {
+	RendderNode
+	//
+	inline()
 }
 
 type MediaBox struct {
@@ -33,7 +47,7 @@ type BoxCoordinates struct {
 type DOMPage struct {
 	PageNo   int
 	MediaBox MediaBox
-	Child    *DOMElement
+	Child    DOMElement
 }
 
 type LayoutContext struct {
@@ -85,8 +99,10 @@ type Container struct {
 	NodePointers
 	Style
 
-	Child *DOMElement
+	Child DOMElement
 }
+
+func (c *Container) block() {}
 
 type FlexItem struct {
 	LayoutBox
@@ -95,7 +111,7 @@ type FlexItem struct {
 
 	AlignSelf   Align
 	JustifySelf Justify
-	Child       *DOMElement
+	Child       DOMElement
 }
 
 type Flex struct {
@@ -107,8 +123,10 @@ type Flex struct {
 	Gap            float64
 	AlignItems     Align
 	JustifyContent Justify
-	Children       []*FlexItem
+	Children       []FlexItem
 }
+
+func (f *Flex) block() {}
 
 // auto flows nodes from one "pipe" to the next.
 type AutoFlow struct {
@@ -121,20 +139,24 @@ type AutoFlow struct {
 	Gap            float64
 	AlignItems     Align
 	JustifyContent Justify
-	Children       []*FlexItem
+	Children       []FlexItem
 }
+
+func (a *AutoFlow) block() {}
 
 type Table struct {
 	LayoutBox
 	NodePointers
 	Style
 
-	Columns []*TableColumn
-	Rows    []*TableRow
+	Columns []TableColumn
+	Rows    []TableRow
 
 	BorderCollapse bool
 	CellSpacing    float64
 }
+
+func (t *Table) block() {}
 
 type TableColumn struct {
 	Width float64
@@ -142,7 +164,7 @@ type TableColumn struct {
 
 type TableRow struct {
 	Height float64
-	Cells  []*TableCell
+	Cells  []TableCell
 }
 
 type TableCell struct {
@@ -156,15 +178,7 @@ type TableCell struct {
 	Child DOMElement
 }
 
-// DOM Node elements
-
-type TextNode struct {
-	LayoutBox
-	NodePointers
-	Style
-
-	Text string
-}
+// Render Nodes:
 
 type ParagraphNode struct {
 	LayoutBox
@@ -177,8 +191,22 @@ type ParagraphNode struct {
 	WordWrap    bool
 	Hyphenation bool
 
-	Inlines []DOMElement
+	Inlines []InlineElement
 }
+
+func (p *ParagraphNode) block() {}
+
+type TextNode struct {
+	LayoutBox
+	NodePointers
+	Style
+
+	Text string
+}
+
+func (t TextNode) Layout(ctx LayoutContext) {}
+func (t TextNode) NodePointers()            { return &t.NodePointers() }
+func (t TextNode) inline()                  {}
 
 type AnnotationNode struct {
 	LayoutBox
@@ -189,6 +217,8 @@ type AnnotationNode struct {
 	Href     string
 }
 
+func (a *AnnotationNode) inline() {}
+
 type ImageNode struct {
 	LayoutBox
 	NodePointers
@@ -196,3 +226,5 @@ type ImageNode struct {
 
 	Details image.Image
 }
+
+func (i *ImageNode) inline() {}
