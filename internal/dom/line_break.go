@@ -1,11 +1,14 @@
 package dom
 
-func (p *ParagraphNode) LineBreak() {
-	for _, inode := range p.Inlines {
-		switch inode.(type) {
-		case TextNode:
-		case AnnotationNode:
-		case ImageNode:
-		}
+func (p *ParagraphNode) LineBreak(ctx LayoutContext) {
+	parent, ok := ctx.ElementCache[p.nodePointers.parentNodeId]
+	if !ok {
+		// paragraph node is the root
+	} else {
+		// paragraph has a parent node
+		(*parent).LayoutBox()
+	}
+	for _, frag := range p.Fragments {
+		frag.inline()
 	}
 }

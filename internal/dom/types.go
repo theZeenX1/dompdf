@@ -11,14 +11,12 @@ type DOMElement interface {
 	// justify itself in the page and set the coordinates, height, etc.
 	Layout(ctx LayoutContext)
 	//
+	LayoutBox() *LayoutBox
+	//
 	NodePointers() *NodePointers
 	//
 	Style() *Style
-}
-
-type RendderNode interface {
-	DOMElement
-	// create stream objects from the given dom node
+	//
 	ToStream() ([]*pdf.StreamObj, []*pdf.Ref, error)
 }
 
@@ -31,13 +29,9 @@ type BlockElement interface {
 
 // inline component (is also a render node)
 type InlineElement interface {
-	RendderNode
+	DOMElement
 	//
 	inline()
-}
-
-type MediaBox struct {
-	LLX, LLY, Width, Height float64
 }
 
 type BoxCoordinates struct {
@@ -45,9 +39,10 @@ type BoxCoordinates struct {
 }
 
 type DOMPage struct {
-	PageNo   int
-	MediaBox MediaBox
-	Child    DOMElement
+	PageNo int
+	Width  int
+	Height int
+	Child  DOMElement
 }
 
 type LayoutContext struct {
@@ -55,6 +50,7 @@ type LayoutContext struct {
 	CurrentNodeId    int
 	CursorX, CursorY float64
 	Pages            []*DOMPage
+	ElementCache     map[int]*DOMElement
 }
 
 type ElementBorder struct {
@@ -178,6 +174,23 @@ type TableCell struct {
 	Child DOMElement
 }
 
+type FloatBox struct {
+	layoutBox    LayoutBox
+	nodePointers NodePointers
+	style        Style
+
+	Children []FloatItem
+}
+
+type FloatItem struct {
+	layoutBox    LayoutBox
+	nodePointers NodePointers
+	style        Style
+
+	FloatLayout FloatLayout
+	Child       InlineElement
+}
+
 type ParagraphNode struct {
 	layoutBox    LayoutBox
 	nodePointers NodePointers
@@ -189,7 +202,7 @@ type ParagraphNode struct {
 	WordWrap    bool
 	Hyphenation bool
 
-	Inlines []InlineElement
+	Fragments []TextNode
 }
 
 func (p *ParagraphNode) block() {}
@@ -201,39 +214,27 @@ type TextNode struct {
 	style        Style
 
 	Text string
+	Href string
 }
 
 func (t TextNode) Layout(ctx LayoutContext)                        {}
 func (t TextNode) NodePointers() *NodePointers                     { return &t.nodePointers }
+func (t TextNode) LayoutBox() *LayoutBox                           { return &t.layoutBox }
 func (t TextNode) Style() *Style                                   { return &t.style }
 func (t TextNode) ToStream() ([]*pdf.StreamObj, []*pdf.Ref, error) { return nil, nil, nil }
 func (t TextNode) inline()                                         {}
-
-type AnnotationNode struct {
-	layoutBox    LayoutBox
-	nodePointers NodePointers
-	style        Style
-
-	TextNode TextNode
-	Href     string
-}
-
-func (a AnnotationNode) Layout(ctx LayoutContext)                        {}
-func (a AnnotationNode) NodePointers() *NodePointers                     { return &a.nodePointers }
-func (a AnnotationNode) Style() *Style                                   { return &a.style }
-func (a AnnotationNode) ToStream() ([]*pdf.StreamObj, []*pdf.Ref, error) { return nil, nil, nil }
-func (a AnnotationNode) inline()                                         {}
 
 type ImageNode struct {
 	layoutBox    LayoutBox
 	nodePointers NodePointers
 	style        Style
 
-	Details image.Image
+	image.Image
 }
 
 func (i ImageNode) Layout(ctx LayoutContext)                        {}
 func (i ImageNode) NodePointers() *NodePointers                     { return &i.nodePointers }
+func (i ImageNode) LayoutBox() *LayoutBox                           { return &i.layoutBox }
 func (i ImageNode) Style() *Style                                   { return &i.style }
 func (i ImageNode) ToStream() ([]*pdf.StreamObj, []*pdf.Ref, error) { return nil, nil, nil }
 func (i ImageNode) inline()                                         {}

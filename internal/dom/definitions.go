@@ -53,3 +53,11 @@ const (
 	TextAlignEnd
 	TextAlignCenter
 )
+
+type FloatLayout int16
+
+const (
+	FloatCenter FloatLayout = iota
+	FloatStart
+	FloatEnd
+)
