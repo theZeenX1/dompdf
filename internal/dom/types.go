@@ -79,7 +79,7 @@ type Style struct {
 	Border          ElementBorder
 	Color           colors.Color
 	Font            *fonts.RegisteredFont
-	FontSize        float64
+	FontSize        int
 	FontStyle       fonts.FontStyle
 	FontWeight      fonts.FontWeight
 }
@@ -196,9 +196,10 @@ type ParagraphNode struct {
 	nodePointers NodePointers
 	style        Style
 
-	TextAlign   TextAlign
-	LineHeight  float64
-	TextIndent  float64
+	TextAlign       TextAlign
+	ParagraphIndent int
+	JustifiedText   bool
+
 	WordWrap    bool
 	Hyphenation bool
 
@@ -217,12 +218,12 @@ type TextNode struct {
 	Href string
 }
 
-func (t TextNode) Layout(ctx LayoutContext)                        {}
-func (t TextNode) NodePointers() *NodePointers                     { return &t.nodePointers }
-func (t TextNode) LayoutBox() *LayoutBox                           { return &t.layoutBox }
-func (t TextNode) Style() *Style                                   { return &t.style }
-func (t TextNode) ToStream() ([]*pdf.StreamObj, []*pdf.Ref, error) { return nil, nil, nil }
-func (t TextNode) inline()                                         {}
+func (t *TextNode) Layout(ctx LayoutContext)                        {}
+func (t *TextNode) NodePointers() *NodePointers                     { return &t.nodePointers }
+func (t *TextNode) LayoutBox() *LayoutBox                           { return &t.layoutBox }
+func (t *TextNode) Style() *Style                                   { return &t.style }
+func (t *TextNode) ToStream() ([]*pdf.StreamObj, []*pdf.Ref, error) { return nil, nil, nil }
+func (t *TextNode) inline()                                         {}
 
 type ImageNode struct {
 	layoutBox    LayoutBox
@@ -232,9 +233,9 @@ type ImageNode struct {
 	image.Image
 }
 
-func (i ImageNode) Layout(ctx LayoutContext)                        {}
-func (i ImageNode) NodePointers() *NodePointers                     { return &i.nodePointers }
-func (i ImageNode) LayoutBox() *LayoutBox                           { return &i.layoutBox }
-func (i ImageNode) Style() *Style                                   { return &i.style }
-func (i ImageNode) ToStream() ([]*pdf.StreamObj, []*pdf.Ref, error) { return nil, nil, nil }
-func (i ImageNode) inline()                                         {}
+func (i *ImageNode) Layout(ctx LayoutContext)                        {}
+func (i *ImageNode) NodePointers() *NodePointers                     { return &i.nodePointers }
+func (i *ImageNode) LayoutBox() *LayoutBox                           { return &i.layoutBox }
+func (i *ImageNode) Style() *Style                                   { return &i.style }
+func (i *ImageNode) ToStream() ([]*pdf.StreamObj, []*pdf.Ref, error) { return nil, nil, nil }
+func (i *ImageNode) inline()                                         {}

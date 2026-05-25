@@ -57,7 +57,13 @@ const (
 type FloatLayout int16
 
 const (
-	FloatCenter FloatLayout = iota
-	FloatStart
-	FloatEnd
+	FloatCenterLeft FloatLayout = iota
+	FloatCenterCenter
+	FloatCenterRight
+	FloatTopLeft
+	FloatTopRight
+	FloatTopCenter
+	FloatBottomLeft
+	FloatBottomCenter
+	FloatBottomRight
 )
