@@ -1,9 +1,6 @@
 package dom
 
-import (
-	"fmt"
-	"math"
-)
+import "fmt"
 
 type lineFragment struct {
 	X, Y          float64
@@ -18,20 +15,33 @@ const (
 	hyphenPenalty = 50
 )
 
-type kpNodeType int16
+type kpBoxType int16
 
 const (
-	tbox kpNodeType = iota
+	tword kpBoxType = iota
 	tglue
 	tpenalty
 )
 
-// Calculate prefix sums of all params as mentioned in the Knuth-Plass Line Break algo
-type params struct {
-	t             kpNodeType
-	x, y, w, p, f float64
-	textNode      *TextNode
-	word          string
+// store a text run inside a box consisting of multiple fonts
+//
+// for e.g., "Hel" (style A) + "lo" (style B)
+type textRun struct {
+	text  string
+	style *Style
+	w     float64
+}
+
+// all probable candidates (potentially active nodes) as mentioned in the Knuth-Plass Line Break algo
+type candidates struct {
+	t       kpBoxType
+	w, y, z float64   // individual dimensions of this item
+	sumW    float64   // accumulated width up to this point
+	sumY    float64   // accumulated stretchability
+	sumZ    float64   // accumulated shrinkability
+	p       float64   // penalty value (if penalty node)
+	flagged bool      // flagged penalty (for consecutive hyphen checks)
+	runs    []textRun // set of continuous characters without whitespaces in between
 }
 
 // active node stores the optimal break points for our paragraph
@@ -41,309 +51,208 @@ type activeNode struct {
 	prev     *activeNode
 }
 
-func (p *ParagraphNode) calculateParams() ([]params, error) {
-	var results []params
+func (p *ParagraphNode) calculateCandidates() ([]candidates, error) {
+	var results []candidates
 
 	// prefix sums
-	sumW, sumX, sumY := 0., 0., 0.
-	currentBoxWidth := 0.
-	var latextTextNode *TextNode
-	currentWord := []rune{}
+	sumW, sumY, sumZ := 0., 0., 0.
 
-	// helper to flush current box in results
-	flushBox := func(t *TextNode) {
-		if currentBoxWidth > 0 {
-			sumW += currentBoxWidth
-			results = append(results, params{
-				t:        tbox,
-				w:        sumW,
-				x:        sumX,
-				y:        sumY,
-				word:     string(currentWord),
-				textNode: t,
-			})
-			currentBoxWidth = 0
-			currentWord = []rune{}
+	// to store the width of the current word
+	currRun := []rune{}
+	currRunWidth := 0.
+
+	currBoxRuns := []textRun{}
+	wordWidth := 0.
+	currStyle := (*Style)(nil)
+
+	// flushes currRun in currBoxRuns
+	//
+	// sets currRunWidth = 0
+	//
+	// and sets currRun back to empty
+	flushRun := func() {
+		if len(currRun) == 0 {
+			return
 		}
+
+		currBoxRuns = append(currBoxRuns, textRun{
+			text:  string(currRun),
+			style: currStyle,
+			w:     currRunWidth,
+		})
+
+		currRun = currRun[:0]
+		currRunWidth = 0
+	}
+
+	// adds wordWidth to sumW
+	//
+	// sets wordWidth to zero
+	//
+	// sets currWord to []rune{}
+	flushWordBox := func() {
+		flushRun()
+
+		if len(currBoxRuns) == 0 {
+			return
+		}
+
+		sumW += wordWidth
+
+		box := candidates{
+			t:    tword,
+			w:    wordWidth,
+			sumW: sumW,
+			sumY: sumY,
+			sumZ: sumZ,
+			runs: append([]textRun(nil), currBoxRuns...),
+		}
+
+		results = append(results, box)
+
+		wordWidth = 0
+		currBoxRuns = currBoxRuns[:0]
+	}
+
+	// sets stretch and shrink as `whiteSpaceWidth / 2` and `whiteSpaceWidth / 3`
+	//
+	// sets runs with a single " "
+	flushGlueBox := func(whiteSpaceWidth float64, textStyle *Style) {
+		stretch := whiteSpaceWidth / 2
+		shrink := whiteSpaceWidth / 3
+
+		sumW += whiteSpaceWidth
+		sumY += stretch
+		sumZ += shrink
+
+		box := candidates{
+			t:    tglue,
+			w:    whiteSpaceWidth,
+			y:    stretch,
+			z:    shrink,
+			sumW: sumW,
+			sumY: sumY,
+			sumZ: sumZ,
+			runs: []textRun{
+				{
+					text:  " ",
+					style: textStyle,
+					w:     whiteSpaceWidth,
+				},
+			},
+		}
+
+		results = append(results, box)
+	}
+
+	// appends a penalty box with p=50
+	//
+	// sets runs as a single word: "-"
+	flushPenaltyBox := func(hyphenWidth float64, textStyle *Style) {
+		results = append(results, candidates{
+			t:       tpenalty,
+			w:       hyphenWidth,
+			sumW:    sumW,
+			sumY:    sumY,
+			sumZ:    sumZ,
+			p:       50,
+			flagged: true,
+			runs: []textRun{
+				{
+					text:  "-",
+					style: textStyle,
+					w:     hyphenWidth,
+				},
+			},
+		})
 	}
 
 	for _, frag := range p.Fragments {
 		fs := frag.style.FontStyle
 		fsize := float64(frag.style.FontSize)
+
 		f, ok := frag.style.Font.Fmap[fs]
-		latextTextNode = &frag
 		if !ok {
-			return nil, fmt.Errorf("font map doesn't contain fs: %d", fs)
+			return nil, fmt.Errorf("font map doesn't contain %d", fs)
 		}
+
 		unitsPerEm := float64(f.Metrics().UnitsPerEm)
+		if unitsPerEm == 0 {
+			unitsPerEm = 1000
+		}
+
+		whiteSpaceW, ok := f.GlyphAdvancedWidth(' ')
+		if !ok {
+			return nil, fmt.Errorf("whitespace not present in glyph advanced width for the font: %s", f.FontName())
+		}
+
+		// flush a "common styled" run in runs
+		if currStyle != &frag.style {
+			flushRun()
+			currStyle = &frag.style
+		}
 
 		for _, r := range frag.Text {
-			rw := float64(0)
+			rw := 0.
+
 			v, ok := f.GlyphAdvancedWidth(r)
 			if !ok {
-				whiteSpaceW, ok := f.GlyphAdvancedWidth(' ')
-				if !ok {
-					return nil, fmt.Errorf("whitespace not present in glyph advanced width")
-				}
-				rw = float64(whiteSpaceW) * fsize / unitsPerEm // fallback
+				rw = float64(whiteSpaceW) * fsize / unitsPerEm
 			} else {
 				rw = float64(v) * fsize / unitsPerEm
 			}
 
 			switch r {
 			case ' ':
-				// flush the preceding word into a box
-				flushBox(latextTextNode)
-				// no consecutive glues
-				if len(results) > 0 && results[len(results)-1].t == tglue {
-					continue
+				// glue
+				// if len(currWord) > 0, append it in a word box
+				// else or after, append ' ' in a glue box
+				if wordWidth > 0 {
+					flushWordBox()
 				}
-
-				// append glue for the space
-				// stretch is 1/2 space width, shrink is 1/3
-				glueW := rw
-				glueStretch := rw / 2
-				glueShrink := rw / 3
-
-				sumW += glueW
-				sumX += glueStretch
-				sumY += glueShrink
-
-				results = append(results, params{
-					t:        tglue,
-					w:        sumW,
-					x:        sumX,
-					y:        sumY,
-					textNode: latextTextNode,
-				})
-
+				flushGlueBox(rw, &frag.style)
 			case '-':
-				// hyphens are part of the word (box), followed by a permissible break (penalty)
-				currentBoxWidth += rw
-				currentWord = append(currentWord, r)
-				flushBox(latextTextNode)
-
-				// add a flagged penalty for the breakpoint
-				results = append(results, params{
-					t:        tpenalty,
-					w:        sumW,
-					x:        sumX,
-					y:        sumY,
-					p:        hyphenPenalty,
-					f:        1,
-					textNode: latextTextNode,
-				})
-
-			case '\n':
-				// explicit forced line break
-				flushBox(latextTextNode)
-
-				results = append(results, params{
-					t:        tpenalty,
-					w:        sumW,
-					x:        sumX,
-					y:        sumY,
-					p:        forcedBreak,
-					f:        0,
-					textNode: latextTextNode,
-				})
-
+				// penalty
+				// first flush the preceding word
+				if wordWidth > 0 {
+					flushWordBox()
+				}
+				// then flush "-"
+				flushPenaltyBox(rw, &frag.style)
 			default:
-				// accumulate normal character's width into the current word box
-				currentBoxWidth += rw
-				currentWord = append(currentWord, r)
+				// word
+				currRun = append(currRun, r)
+				currRunWidth += rw
+				wordWidth += rw
 			}
 		}
 	}
 
-	// Flush the final word of the paragraph
-	flushBox(latextTextNode)
+	if wordWidth > 0 {
+		flushWordBox()
+	}
 
-	// we append an infinite glue followed by a forced break penalty.
-	// this is for the remaining space on the last line so it doesn't get fully justified (stretched out).
-	sumX += infinity
-	results = append(results, params{
-		t:        tglue,
-		w:        sumW,
-		x:        sumX,
-		y:        sumY,
-		textNode: latextTextNode,
-	})
-
-	results = append(results, params{
-		t:        tpenalty,
-		w:        sumW,
-		x:        sumX,
-		y:        sumY,
-		p:        forcedBreak,
-		f:        0,
-		textNode: latextTextNode,
+	// append paragraph end
+	results = append(results, candidates{
+		t:       tpenalty,
+		p:       -10000,
+		flagged: false,
+		sumW:    sumW,
+		sumY:    sumY,
+		sumZ:    sumZ,
 	})
 
 	return results, nil
 }
 
 func (p *ParagraphNode) LineBreak(ctx LayoutContext) ([]lineFragment, error) {
-	// first get all line break params:
-	params, err := p.calculateParams()
+	// first get all line break candidates:
+	candidates, err := p.calculateCandidates()
 	if err != nil {
-		fmt.Printf("dom calculateParams: %v", err)
+		fmt.Printf("dom calculate: %v", err)
 		return nil, err
 	}
-
-	// width is an "inside" property, so no need to integrate margin here
-	pW := p.layoutBox.Width - (p.style.Padding.Left + p.style.Padding.Right)
-
-	lineWidth := pW
-	// for the first line:
-	if p.ParagraphIndent != 0 {
-		lineWidth -= float64(p.ParagraphIndent)
-	}
-
-	// -1 is the start of the paragraph
-	activeNodes := []*activeNode{{index: -1, demerits: 0, prev: nil}}
-
-	for j, node := range params {
-		// is current node a break point?
-		// Knuth-Plass breaks at penalties
-		// or at glues immediately preceded by a box
-		isBreakpoint := false
-		if node.t == tpenalty {
-			isBreakpoint = true
-		} else if node.t == tglue && j > 0 && params[j-1].t == tbox {
-			isBreakpoint = true
-		}
-
-		if !isBreakpoint {
-			continue
-		}
-
-		bestNode := &activeNode{}
-		minDemerits := math.MaxFloat64
-		nextActiveNodes := []*activeNode{}
-
-		// fallback if current box width is greater than paragraph width
-		fallbackNode := &activeNode{}
-		minOverfullRatio := math.MaxFloat64
-
-		// go through all active nodes
-		for _, active := range activeNodes {
-			i := active.index
-
-			w, x, y := 0., 0., 0.
-			if i >= 0 {
-				w, x, y = params[i].w, params[i].x, params[i].y
-			}
-
-			// L is the length between i and j
-			L := float64(node.w - w)
-			diff := lineWidth - L
-
-			r := float64(0)
-			if diff > 0 {
-				// L too short
-				stretch := float64(node.x - x)
-				if stretch > 0 {
-					r = diff / stretch
-				} else {
-					r = 10000
-				}
-			} else if diff < 0 {
-				// L too long
-				shrink := float64(node.y - y)
-				if shrink > 0 {
-					r = diff / shrink
-				} else {
-					r = -10000
-				}
-			}
-
-			// if r < -1, line can't shrink enough (too long)
-			if r < -1 {
-				if math.Abs(r) < minOverfullRatio {
-					minOverfullRatio = math.Abs(r)
-					fallbackNode = active
-				}
-				continue
-			}
-
-			// valid candidate, keep it for the next iterations
-			nextActiveNodes = append(nextActiveNodes, active)
-
-			// calculate badness:
-			badness := min(10000, 100*math.Pow(math.Abs(r), 3))
-
-			// demerit calculation:
-			demerits := float64(0)
-			penalty := float64(node.p)
-			if penalty <= forcedBreak {
-				demerits = math.Pow(1+badness, 2)
-			} else {
-				demerits = math.Pow(1+badness+penalty, 2)
-			}
-
-			// avoid 2 hyphanated consecutive lines
-			if node.f == 1 && i >= 0 && params[i].f == 1 {
-				demerits += 3000
-			}
-
-			// reassign the bestNode for backtracking
-			// (rest all nodes will have prev == nil)
-			totalDemerits := active.demerits + demerits
-			if totalDemerits < minDemerits {
-				minDemerits = totalDemerits
-				bestNode = active
-			}
-		}
-
-		// handle overflow lines
-		if bestNode == nil && fallbackNode != nil {
-			bestNode = fallbackNode
-			minDemerits = fallbackNode.demerits + 100000
-			nextActiveNodes = append(nextActiveNodes, fallbackNode)
-		}
-
-		if bestNode != nil {
-			newNode := &activeNode{
-				index:    j,
-				demerits: minDemerits,
-				prev:     bestNode,
-			}
-			nextActiveNodes = append(nextActiveNodes, newNode)
-		}
-
-		activeNodes = nextActiveNodes
-	}
-
-	// find breaks
-	breakIndices := []int{}
-	if len(activeNodes) > 0 {
-		curr := activeNodes[len(activeNodes)-1]
-		for curr != nil && curr.index != -1 {
-			breakIndices = append([]int{curr.index}, breakIndices...)
-			curr = curr.prev
-		}
-	}
-
-	fragments := []lineFragment{}
-	startIdx := 0
-	for _, breakIdx := range breakIndices {
-		lineParams := params[startIdx : breakIdx+1]
-
-		for _, lp := range lineParams {
-			if lp.t == tbox || (lp.t == tpenalty && lp.f == 1) {
-				// words/hyphens
-				line := []TextNode{}
-
-				fragments = append(fragments, lineFragment{
-					Line: line,
-				})
-			} else if lp.t == tglue && lp != lineParams[len(lineParams)-1] {
-				// spaces
-			}
-		}
-
-	}
-
-	return fragments, nil
+	lines := []lineFragment{}
+	fmt.Println(candidates)
+	return lines, nil
 }
