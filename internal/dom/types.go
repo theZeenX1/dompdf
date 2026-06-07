@@ -208,6 +208,15 @@ type ParagraphNode struct {
 
 func (p *ParagraphNode) block() {}
 
+// AnnotationNode wraps around the child,
+// along the borders to create an annotation box
+type AnnotationNode struct {
+	layoutBox LayoutBox
+
+	Href  string
+	Child DOMElement
+}
+
 // Render Nodes:
 type TextNode struct {
 	layoutBox    LayoutBox

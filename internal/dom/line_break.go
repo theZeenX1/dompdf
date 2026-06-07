@@ -18,14 +18,6 @@ const (
 	hyphenPenalty = 50.
 )
 
-type kpBoxType int16
-
-const (
-	tword kpBoxType = iota
-	tglue
-	tpenalty
-)
-
 // store a text run inside a box consisting of multiple fonts
 //
 // for e.g., "Hel" (style A) + "lo" (style B)
