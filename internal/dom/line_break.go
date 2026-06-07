@@ -1,6 +1,9 @@
 package dom
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 type lineFragment struct {
 	X, Y          float64
@@ -10,9 +13,9 @@ type lineFragment struct {
 
 // Helper constants for Knuth-Plass defaults
 const (
-	infinity      = 1000000
-	forcedBreak   = -10000
-	hyphenPenalty = 50
+	infinity      = 10000.
+	forcedBreak   = -10000.
+	hyphenPenalty = 50.
 )
 
 type kpBoxType int16
@@ -33,7 +36,7 @@ type textRun struct {
 }
 
 // all probable candidates (potentially active nodes) as mentioned in the Knuth-Plass Line Break algo
-type candidates struct {
+type candidate struct {
 	t       kpBoxType
 	w, y, z float64   // individual dimensions of this item
 	sumW    float64   // accumulated width up to this point
@@ -46,13 +49,13 @@ type candidates struct {
 
 // active node stores the optimal break points for our paragraph
 type activeNode struct {
-	index    int
-	demerits float64
-	prev     *activeNode
+	index    int         // index of the candidate in candidates array
+	demerits float64     // minimization criteria
+	prev     *activeNode // previous activeNode for backtracking
 }
 
-func (p *ParagraphNode) calculateCandidates() ([]candidates, error) {
-	var results []candidates
+func (p *ParagraphNode) calculateCandidates() ([]candidate, error) {
+	var results []candidate
 
 	// prefix sums
 	sumW, sumY, sumZ := 0., 0., 0.
@@ -99,7 +102,7 @@ func (p *ParagraphNode) calculateCandidates() ([]candidates, error) {
 
 		sumW += wordWidth
 
-		box := candidates{
+		box := candidate{
 			t:    tword,
 			w:    wordWidth,
 			sumW: sumW,
@@ -125,7 +128,7 @@ func (p *ParagraphNode) calculateCandidates() ([]candidates, error) {
 		sumY += stretch
 		sumZ += shrink
 
-		box := candidates{
+		box := candidate{
 			t:    tglue,
 			w:    whiteSpaceWidth,
 			y:    stretch,
@@ -149,7 +152,7 @@ func (p *ParagraphNode) calculateCandidates() ([]candidates, error) {
 	//
 	// sets runs as a single word: "-"
 	flushPenaltyBox := func(hyphenWidth float64, textStyle *Style) {
-		results = append(results, candidates{
+		results = append(results, candidate{
 			t:       tpenalty,
 			w:       hyphenWidth,
 			sumW:    sumW,
@@ -233,9 +236,9 @@ func (p *ParagraphNode) calculateCandidates() ([]candidates, error) {
 	}
 
 	// append paragraph end
-	results = append(results, candidates{
+	results = append(results, candidate{
 		t:       tpenalty,
-		p:       -10000,
+		p:       forcedBreak,
 		flagged: false,
 		sumW:    sumW,
 		sumY:    sumY,
@@ -254,5 +257,138 @@ func (p *ParagraphNode) LineBreak(ctx LayoutContext) ([]lineFragment, error) {
 	}
 	lines := []lineFragment{}
 	fmt.Println(candidates)
+
+	// set of all activeNode sequences
+	activeNodes := []*activeNode{{index: -1, demerits: 0, prev: nil}}
+
+	// here b is the potential break node
+	for b, candidate := range candidates {
+		// first check if the box is a breakpoint
+		// glue -> ok, if prev box is a word
+		// penalties -> ok
+		// word -> not ok
+		isBreakPoint := false
+		if candidate.t == tpenalty {
+			isBreakPoint = true
+		} else if candidate.t == tglue && b > 0 && candidates[b-1].t == tword {
+			isBreakPoint = true
+		}
+
+		if !isBreakPoint {
+			continue
+		}
+
+		var bestNode *activeNode
+		minDemerits := math.MaxFloat64
+		nextActiveNodes := append([]*activeNode(nil), activeNodes...)
+
+		// fallback
+		fallbackNode := &activeNode{}
+		minOverflowRatio := math.MaxFloat64
+
+		// go through all active nodes:
+		for _, activeNode := range activeNodes {
+			i := activeNode.index
+			prevSumW, prevSumZ, prevSumY := 0., 0., 0.
+			prevW := 0.
+
+			if i >= 0 {
+				prevSumW, prevSumZ, prevSumY = candidates[i].sumW, candidates[i].sumZ, candidates[i].sumY
+				prevW = candidates[i].w
+			}
+
+			// TODO: something like this: L := scanLines(ctx)
+			L := p.layoutBox.Width - (p.style.Padding.Left + p.style.Padding.Right)
+			// paragraph indent is only on the first line
+			if p.ParagraphIndent != 0 && i < 0 {
+				L -= float64(p.ParagraphIndent)
+			}
+
+			// La_b -> length of new line post break
+			// include the current box in the line (i.e., candidate.sumW only, don't subtract its width)
+			La_b := candidate.sumW - (prevSumW - prevW)
+
+			diff := L - La_b
+			// adj ratio:
+			r := 0.
+			if diff > 0 {
+				// stretch
+				stretch := candidate.sumY - prevSumY
+				if stretch > 0 {
+					r = (L - La_b) / stretch
+				} else {
+					r = infinity
+				}
+			} else {
+				// shrink
+				shrink := candidate.sumZ - prevSumZ
+				if shrink > 0 {
+					r = (L - La_b) / shrink
+				} else {
+					r = infinity
+				}
+			}
+
+			// line too long
+			if r < -1 {
+				if math.Abs(r) < minOverflowRatio {
+					minOverflowRatio = math.Abs(r)
+					fallbackNode = activeNode
+				}
+				continue
+			}
+
+			// valid candidate:
+			nextActiveNodes = append(nextActiveNodes, activeNode)
+
+			// calc badness:
+			badness := min(infinity, 100*math.Pow(math.Abs(r), 3))
+
+			// demerits:
+			demerits := 0.
+			penalty := candidate.p
+			if penalty >= 0 {
+				demerits = math.Pow(1+badness+penalty, 2)
+			} else if penalty > -infinity {
+				demerits = math.Pow(1+badness, 2) - math.Pow(penalty, 2)
+			} else {
+				demerits = math.Pow(1+badness, 2)
+			}
+
+			// avoid 2 hyphenated consecutive lines
+			if candidate.flagged && i >= 0 && candidates[i].flagged {
+				demerits += 3000
+			}
+
+			// reassign bestnode
+			totalDemerits := activeNode.demerits + demerits
+			if totalDemerits < minDemerits {
+				minDemerits = totalDemerits
+				bestNode = activeNode
+			}
+		}
+
+		// handle overflow lines
+		if bestNode == nil && fallbackNode != nil {
+			bestNode = fallbackNode
+			minDemerits = fallbackNode.demerits + infinity
+			nextActiveNodes = append(nextActiveNodes, fallbackNode)
+		}
+
+		if bestNode != nil {
+			newNode := &activeNode{
+				index:    b,
+				demerits: minDemerits,
+				prev:     bestNode,
+			}
+			nextActiveNodes = append(nextActiveNodes, newNode)
+		}
+
+		activeNodes = nextActiveNodes
+	}
+
+	for range activeNodes {
+	}
+
 	return lines, nil
 }

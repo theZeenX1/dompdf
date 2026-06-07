@@ -215,7 +215,6 @@ type TextNode struct {
 	style        Style
 
 	Text string
-	Href string
 }
 
 func (t *TextNode) Layout(ctx LayoutContext)                        {}
