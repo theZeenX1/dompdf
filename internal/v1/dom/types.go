@@ -1,10 +1,10 @@
 package dom
 
 import (
-	"github.com/theZeenX1/dompdf/internal/colors"
-	"github.com/theZeenX1/dompdf/internal/fonts"
-	"github.com/theZeenX1/dompdf/internal/image"
-	"github.com/theZeenX1/dompdf/internal/pdf"
+	"github.com/theZeenX1/dompdf/internal/v1/colors"
+	"github.com/theZeenX1/dompdf/internal/v1/fonts"
+	"github.com/theZeenX1/dompdf/internal/v1/image"
+	"github.com/theZeenX1/dompdf/internal/v1/pdf"
 )
 
 type DOMElement interface {

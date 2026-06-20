@@ -1,8 +1,8 @@
 package image
 
 import (
-	"github.com/theZeenX1/dompdf/internal/colors"
-	"github.com/theZeenX1/dompdf/internal/pdf"
+	"github.com/theZeenX1/dompdf/internal/v1/colors"
+	"github.com/theZeenX1/dompdf/internal/v1/pdf"
 )
 
 type Image struct {
