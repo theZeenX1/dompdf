@@ -1,5 +1,12 @@
 package dom
 
+type DisplayType int16
+
+const (
+	Block DisplayType = iota
+	Inline
+)
+
 type MeasurementType int16
 
 const (
@@ -66,4 +73,10 @@ const (
 	FloatBottomLeft
 	FloatBottomCenter
 	FloatBottomRight
+)
+
+type LangCode string
+
+const (
+	EnglishUS LangCode = "en-us"
 )

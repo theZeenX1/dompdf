@@ -159,7 +159,8 @@ func (p *ParagraphNode) createKpNodes() ([]kpNode, error) {
 				flushBox()
 				// then flush the glue
 				flushGlue(rw)
-			case '-':
+			case '-', '\u00AD':
+				// TODO: \u00ad is a soft hyphen, flagged == true for that, enable a true/false flag in flush penalty
 				// add "-" to the current run:
 				currentRun = append(currentRun, r)
 				currentWidth += rw
@@ -218,7 +219,7 @@ func (p *ParagraphNode) kpMainLoop(
 			}
 
 			// adjustment ratio:
-			r := 0.
+			r := 0.Then the loop runs as-is. The - chars in the hyphenated text hit the existing case '-', '\u00AD': branch, producing box + penalty naturally.
 			diff := L - La_b
 			if diff > 0 {
 				// line too short
@@ -328,6 +329,7 @@ func (p *ParagraphNode) kpMainLoop(
 }
 
 func (p *ParagraphNode) kpLineBreak(ctx LayoutContext) ([]line, error) {
+	// create kp nodes:
 	nodes, err := p.createKpNodes()
 	if err != nil {
 		return nil, err
@@ -495,11 +497,4 @@ func (a *kpActiveNodeList) getLast() *kpActiveNode {
 	} else {
 		return a.tail.prev
 	}
-}
-
-// trie for hyphenation:
-
-type kpPackedTrieNode struct {
-	r   rune  // specific rune
-	idx int32 // id refering to the next position in the trie
 }
