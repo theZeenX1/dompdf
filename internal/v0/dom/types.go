@@ -1,10 +1,10 @@
 package dom
 
 import (
-	"github.com/theZeenX1/dompdf/internal/v1/colors"
-	"github.com/theZeenX1/dompdf/internal/v1/fonts"
-	"github.com/theZeenX1/dompdf/internal/v1/image"
-	"github.com/theZeenX1/dompdf/internal/v1/pdf"
+	"github.com/theZeenX1/dompdf/internal/v0/colors"
+	"github.com/theZeenX1/dompdf/internal/v0/fonts"
+	"github.com/theZeenX1/dompdf/internal/v0/image"
+	"github.com/theZeenX1/dompdf/internal/v0/pdf"
 )
 
 type DOMElement interface {
@@ -20,6 +20,8 @@ type DOMElement interface {
 	ToStream() ([]*pdf.StreamObj, []*pdf.Ref, error)
 }
 
+// DOM uses top-left as origin for the coordinate system,
+// unlike the PDF coordinate system which uses bottom-left as the origin
 type BoxCoordinates struct {
 	Top, Left, Right, Bottom float64
 }
@@ -69,6 +71,7 @@ type Style struct {
 	FontSize        int
 	FontStyle       fonts.FontStyle
 	FontWeight      fonts.FontWeight
+	LineHeight      float64 // in multiples of inherit line-height (lineGap + asc + abs(desc))
 }
 
 type LayoutBox struct {

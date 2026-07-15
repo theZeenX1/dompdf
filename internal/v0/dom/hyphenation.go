@@ -60,7 +60,7 @@ func hyphenateWord(word string, langCode LangCode) (string, error) {
 
 	// check if word is in exceptions
 	metrics := hyphenationMetricsCache[langCode]
-	if metrics.Exceptions != nil && len(metrics.Exceptions) > 0 {
+	if len(metrics.Exceptions) > 0 {
 		if hyphenated, ok := metrics.Exceptions[word]; ok {
 			return hyphenated, nil
 		}
@@ -88,7 +88,7 @@ func hyphenateWord(word string, langCode LangCode) (string, error) {
 			node = node.children[lowerCharacters[j]]
 
 			if node != nil {
-				if node.strengths != nil && len(node.strengths) > 0 {
+				if len(node.strengths) > 0 {
 					for k := 0; k < len(node.strengths); k++ {
 						strengths[i+k] = max(strengths[i+k], node.strengths[k])
 					}
