@@ -121,11 +121,12 @@ func (p *ParagraphNode) createKpNodes() ([]kpNode, error) {
 	}
 
 	// flagged on soft-penalty (\u00AD)
-	flushPenalty := func(flagged bool) {
+	flushPenalty := func(flagged bool, hyphenW float64) {
 		nodes = append(nodes, kpNode{
 			t:       tpenalty,
 			penalty: kpPenalty,
 			flagged: flagged,
+			width:   hyphenW,
 		})
 	}
 
@@ -218,12 +219,12 @@ func (p *ParagraphNode) createKpNodes() ([]kpNode, error) {
 				currRunsWidth += rw
 				// then flushBox and flushPenalty
 				flushBox()
-				flushPenalty(false)
+				flushPenalty(false, 0)
 			case '\u00AD':
 				// soft-hyphen (from hyphenation)
 				// if flagged == true, we add hyphen on paint
 				flushBox()
-				flushPenalty(true)
+				flushPenalty(true, rw)
 			default:
 				currentRun = append(currentRun, r)
 				currRunWidth += rw
@@ -245,43 +246,47 @@ func (p *ParagraphNode) createKpNodes() ([]kpNode, error) {
 	return nodes, nil
 }
 
+// follows kp main loop as defined in the paper
+// active nodes represents the set of all plausible break-points that are considered valid by the algorithm
+// if this set is empty (i.e., no break-point is found), we go for the node with the least demerits
+// if an overfull break-point is also not possible, then the algorithm panics and exits
 func (p *ParagraphNode) kpMainLoop(
-	index int, nodes []kpNode,
+	b int, nodes []kpNode,
 	sumW, sumY, sumZ float64,
 	activeNodes *kpLinkedList,
 ) {
-	activeNode := activeNodes.getFirst()
-	demerits := 0.
-
+	a := activeNodes.getFirst()
+	var overfullNode *kpBreakPoint = nil
 	for {
-		if activeNodes.isNil(activeNode) {
+		// this outer for loop is redundant as we don't use the j < j0 check
+		// as j0 here is "0" (we assume all lines to be of the same length, unless the TODO is completed)
+		if activeNodes.isNil(a) {
 			break
 		}
 
-		// candidates per class:
 		candidates := []kpCandidate{{demerits: kpInfinity}, {demerits: kpInfinity}, {demerits: kpInfinity}, {demerits: kpInfinity}}
+		D := kpInfinity
 
 		for {
-			if activeNodes.isNil(activeNode) {
-				break
-			}
+			// here we go through all the previously plausible break-points (nodes a_i)
+			// if the current node b is a valid break-point for node a, we insert this in the activeNodes set with the calculated class (c)
+			// thus for each new node b we find upto 4 possible new break-points (b_c0, b_c1, b_c2, b_c3), which are then inserted in the activeNodes set
+			nextA := a.next
 
-			next := activeNode.next
-			currentLine := activeNode.data.line + 1
-
-			La_b := sumW - activeNode.data.sumW
-			// TODO: somehow get L using context and index of line (currentLine)!
-			L := p.style.Width - (p.style.Padding.Left + p.style.Padding.Right)
-			if p.ParagraphIndent != 0 && currentLine == 1 {
+			// line width from a -> b
+			// TODO: try to use LayoutContext to get the current line width somehow?
+			La_b := sumW - a.data.sumW
+			L := p.layoutBox.Width - (p.style.Padding.Left + p.style.Padding.Right)
+			if p.ParagraphIndent != 0 && a.data.line != 0 {
 				L -= float64(p.ParagraphIndent)
 			}
 
-			// adjustment ratio:
+			// adjustment ratio calculation
 			r := 0.
 			diff := L - La_b
 			if diff > 0 {
 				// line too short
-				stretch := sumY - activeNode.data.sumY
+				stretch := sumY - a.data.sumY
 				if stretch > 0 {
 					r = diff / stretch
 				} else {
@@ -289,7 +294,7 @@ func (p *ParagraphNode) kpMainLoop(
 				}
 			} else {
 				// line too long
-				shrink := sumZ - activeNode.data.sumZ
+				shrink := sumZ - a.data.sumZ
 				if shrink > 0 {
 					r = diff / shrink
 				} else {
@@ -297,25 +302,41 @@ func (p *ParagraphNode) kpMainLoop(
 				}
 			}
 
-			if r < -1 || (nodes[index].t == tpenalty && nodes[index].penalty == -kpInfinity) {
-				activeNodes.delete(activeNode)
+			if r < -1 || (nodes[b].t == tpenalty && nodes[b].penalty == -kpInfinity) {
+				// the line is too long, therefore we remove this break-point from activeNodes set,
+				// this will prevent any future nodes from adopting this break-point as a parent
+				// (re-inserted if activeNodes is empty)
+				if overfullNode == nil || r > overfullNode.ratio {
+					overfullNode = &kpBreakPoint{
+						index:        b,
+						parent:       a.data,
+						fitnessClass: 3,
+						line:         a.data.line + 1,
+						demerits:     0,
+						ratio:        r,
+						sumW:         sumW,
+						sumY:         sumY,
+						sumZ:         sumZ,
+					}
+				}
+				activeNodes.delete(a)
 			}
 
-			if r >= -1 && r <= kpRho {
+			if r >= -1 && r < kpRho {
 				// demerit calculation:
 				badness := 100 * math.Pow(math.Abs(r), 3)
-
-				if nodes[index].t == tpenalty && nodes[index].penalty >= 0 {
-					demerits = math.Pow(kpDemeritsLine+badness, 2) + math.Pow(nodes[index].penalty, 2)
-				} else if nodes[index].t == tpenalty && nodes[index].penalty < 0 {
-					demerits = math.Pow(kpDemeritsLine+badness, 2) - math.Pow(nodes[index].penalty, 2)
+				currDemerits := 0.
+				if nodes[b].t == tpenalty && nodes[b].penalty >= 0 {
+					currDemerits = math.Pow(kpDemeritsLine+badness, 2) + math.Pow(nodes[b].penalty, 2)
+				} else if nodes[b].t == tpenalty && nodes[b].penalty < 0 {
+					currDemerits = math.Pow(kpDemeritsLine+badness, 2) - math.Pow(nodes[b].penalty, 2)
 				} else {
-					demerits = math.Pow(kpDemeritsLine+badness, 2)
+					currDemerits = math.Pow(kpDemeritsLine+badness, 2)
 				}
 
-				if nodes[index].t == tpenalty && nodes[index].flagged &&
-					nodes[activeNode.data.index].t == tpenalty && nodes[activeNode.data.index].flagged {
-					demerits += kpDemeritsFlagged
+				if nodes[b].t == tpenalty && nodes[b].flagged &&
+					nodes[a.data.index].t == tpenalty && nodes[a.data.index].flagged {
+					currDemerits += kpDemeritsFlagged
 				}
 
 				// current class:
@@ -330,64 +351,78 @@ func (p *ParagraphNode) kpMainLoop(
 					c = 3
 				}
 
-				if math.Abs(float64(c-activeNode.data.fitnessClass)) > 1 {
-					demerits += kpDemeritsFitness
+				// if too much change in fitness class
+				if math.Abs(float64(c-a.data.fitnessClass)) > 1 {
+					currDemerits += kpDemeritsFitness
 				}
 
 				// if this is a better candidate for the algo
-				if demerits < candidates[c].demerits {
+				if currDemerits < candidates[c].demerits {
 					candidates[c] = kpCandidate{
-						active:   activeNode.data,
+						active:   a.data,
 						ratio:    r,
-						demerits: demerits,
+						demerits: currDemerits,
+					}
+					if currDemerits < D {
+						D = currDemerits
 					}
 				}
 			}
 
-			activeNode = next
-
-			if !activeNodes.isNil(activeNode) && activeNode.data.line >= currentLine {
+			a = nextA
+			if activeNodes.isNil(a) {
 				break
 			}
 		}
 
-		// calculate sums till next box or penalty:
-		w, y, z := 0., 0., 0.
-		for i := index; i < len(nodes); i++ {
-			if nodes[i].t == tglue {
-				w += nodes[i].width
-				y += nodes[i].y
-				z += nodes[i].z
-			} else {
-				break
-			}
-		}
-
-		for fitnessClass := 0; fitnessClass < len(candidates); fitnessClass++ {
-			candidate := candidates[fitnessClass]
-			if candidate.demerits < kpInfinity {
-				newActiveNode := &kpBreakPoint{
-					index:        index,
-					parent:       candidate.active,
-					fitnessClass: fitnessClass,
-					line:         candidate.active.line + 1,
-					demerits:     candidate.demerits,
-					ratio:        candidate.ratio,
-					sumW:         sumW + w,
-					sumY:         sumY + y,
-					sumZ:         sumZ + z,
-				}
-
-				if activeNodes.isNil(activeNode) {
-					activeNodes.pushBack(&kpLinkedListNode{
-						data: newActiveNode,
-					})
+		if D < kpInfinity {
+			// calculate sums till next box or penalty:
+			w, y, z := 0., 0., 0.
+			for i := b; i < len(nodes); i++ {
+				if nodes[i].t == tglue {
+					w += nodes[i].width
+					y += nodes[i].y
+					z += nodes[i].z
+				} else if nodes[i].t == tpenalty && nodes[i].flagged {
+					w += nodes[i].width
 				} else {
-					activeNodes.insertBefore(activeNode, &kpLinkedListNode{
-						data: newActiveNode,
-					})
+					break
 				}
 			}
+
+			for fitnessClass := 0; fitnessClass < len(candidates); fitnessClass++ {
+				candidate := candidates[fitnessClass]
+				if candidate.demerits < kpInfinity {
+					newActiveNode := &kpBreakPoint{
+						index:        b,
+						parent:       candidate.active,
+						fitnessClass: fitnessClass,
+						line:         candidate.active.line + 1,
+						demerits:     candidate.demerits,
+						ratio:        candidate.ratio,
+						sumW:         sumW + w,
+						sumY:         sumY + y,
+						sumZ:         sumZ + z,
+					}
+					if activeNodes.isNil(a) {
+						activeNodes.pushBack(&kpLinkedListNode{
+							data: newActiveNode,
+						})
+					} else {
+						activeNodes.insertBefore(a, &kpLinkedListNode{
+							data: newActiveNode,
+						})
+					}
+				}
+			}
+		}
+	}
+
+	if activeNodes.size == 0 {
+		if overfullNode != nil {
+			activeNodes.pushBack(&kpLinkedListNode{data: overfullNode})
+		} else {
+			panic("no feasible breakpoints and no overfull fallback found")
 		}
 	}
 }
@@ -404,27 +439,27 @@ func (p *ParagraphNode) kpLineBreak(ctx LayoutContext) ([]*line, error) {
 	activeNodes := newList()
 	activeNodes.pushBack(&kpLinkedListNode{
 		data: &kpBreakPoint{
-			index:        0,
+			index:        -1,
 			parent:       nil,
-			line:         0,
+			line:         -1,
 			fitnessClass: 0,
 			demerits:     0,
 			ratio:        0,
 		},
 	})
 
-	for i := range nodes {
-		if nodes[i].t == tbox {
-			sumW += nodes[i].width
-		} else if nodes[i].t == tglue {
-			if i > 0 && nodes[i-1].t == tbox {
-				p.kpMainLoop(i, nodes, sumW, sumY, sumZ, activeNodes)
+	for b := range nodes {
+		if nodes[b].t == tbox {
+			sumW += nodes[b].width
+		} else if nodes[b].t == tglue {
+			if b > 0 && nodes[b-1].t == tbox {
+				p.kpMainLoop(b, nodes, sumW, sumY, sumZ, activeNodes)
 			}
-			sumW += nodes[i].width
-			sumY += nodes[i].y
-			sumZ += nodes[i].z
-		} else if nodes[i].t == tpenalty && nodes[i].penalty != kpInfinity {
-			p.kpMainLoop(i, nodes, sumW, sumY, sumZ, activeNodes)
+			sumW += nodes[b].width
+			sumY += nodes[b].y
+			sumZ += nodes[b].z
+		} else if nodes[b].t == tpenalty && nodes[b].penalty != kpInfinity {
+			p.kpMainLoop(b, nodes, sumW, sumY, sumZ, activeNodes)
 		}
 	}
 
