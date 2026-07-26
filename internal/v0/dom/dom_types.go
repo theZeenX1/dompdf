@@ -4,20 +4,17 @@ import (
 	"github.com/theZeenX1/dompdf/internal/v0/colors"
 	"github.com/theZeenX1/dompdf/internal/v0/fonts"
 	"github.com/theZeenX1/dompdf/internal/v0/image"
-	"github.com/theZeenX1/dompdf/internal/v0/pdf"
 )
 
 type DOMElement interface {
 	// justify itself in the page and set the coordinates, height, etc.
 	Layout(ctx LayoutContext)
 	//
-	LayoutBox() *LayoutBox
+	LayoutBox() LayoutBox
 	//
-	NodePointers() *NodePointers
+	NodePointers() NodePointers
 	//
-	Style() *Style
-	//
-	ToStream() ([]*pdf.StreamObj, []*pdf.Ref, error)
+	Style() Style
 }
 
 // DOM uses top-left as origin for the coordinate system,
@@ -27,10 +24,10 @@ type BoxCoordinates struct {
 }
 
 type DOMPage struct {
-	PageNo int
-	Width  int
-	Height int
-	Child  DOMElement
+	PageNo                       int            // index of the page (0-based)
+	Width, Height                float64        // width, height of the page in pt
+	PageStartTotal, PageEndTotal float64        // if all pages are stacked vertically, the start and end of the page minus the margin heights
+	PageMargin                   BoxCoordinates // "padding" of the page
 }
 
 type LayoutContext struct {
@@ -68,10 +65,10 @@ type Style struct {
 	Border          ElementBorder
 	Color           colors.Color
 	Font            *fonts.RegisteredFont
-	FontSize        int
+	FontSize        float64
 	FontStyle       fonts.FontStyle
 	FontWeight      fonts.FontWeight
-	LineHeight      float64 // in multiples of inherit line-height (lineGap + asc + abs(desc))
+	LineHeight      float64 // multiple of inherit line-height (lineGap + asc + abs(desc))
 }
 
 type LayoutBox struct {
@@ -188,6 +185,11 @@ type ParagraphNode struct {
 	Fragments []TextNode
 }
 
+func (p *ParagraphNode) Layout(ctx LayoutContext)   {}
+func (p *ParagraphNode) NodePointers() NodePointers { return p.nodePointers }
+func (p *ParagraphNode) LayoutBox() LayoutBox       { return p.layoutBox }
+func (p *ParagraphNode) Style() Style               { return p.style }
+
 // AnnotationNode wraps around the child,
 // along the borders to create an annotation box
 type AnnotationNode struct {
@@ -207,11 +209,10 @@ type TextNode struct {
 	Text     string
 }
 
-func (t *TextNode) Layout(ctx LayoutContext)                        {}
-func (t *TextNode) NodePointers() *NodePointers                     { return &t.nodePointers }
-func (t *TextNode) LayoutBox() *LayoutBox                           { return &t.layoutBox }
-func (t *TextNode) Style() *Style                                   { return &t.style }
-func (t *TextNode) ToStream() ([]*pdf.StreamObj, []*pdf.Ref, error) { return nil, nil, nil }
+func (t *TextNode) Layout(ctx LayoutContext)   {}
+func (t *TextNode) NodePointers() NodePointers { return t.nodePointers }
+func (t *TextNode) LayoutBox() LayoutBox       { return t.layoutBox }
+func (t *TextNode) Style() Style               { return t.style }
 
 type ImageNode struct {
 	layoutBox    LayoutBox
@@ -221,8 +222,7 @@ type ImageNode struct {
 	image.Image
 }
 
-func (i *ImageNode) Layout(ctx LayoutContext)                        {}
-func (i *ImageNode) NodePointers() *NodePointers                     { return &i.nodePointers }
-func (i *ImageNode) LayoutBox() *LayoutBox                           { return &i.layoutBox }
-func (i *ImageNode) Style() *Style                                   { return &i.style }
-func (i *ImageNode) ToStream() ([]*pdf.StreamObj, []*pdf.Ref, error) { return nil, nil, nil }
+func (i *ImageNode) Layout(ctx LayoutContext)   {}
+func (i *ImageNode) NodePointers() NodePointers { return i.nodePointers }
+func (i *ImageNode) LayoutBox() LayoutBox       { return i.layoutBox }
+func (i *ImageNode) Style() Style               { return i.style }

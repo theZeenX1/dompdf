@@ -63,7 +63,6 @@ func Standard14Width(name string, r rune) (int, bool) {
 type standard14FontEntry struct {
 	metrics Metrics
 	widths  map[rune]int
-	kern    map[runepair]int
 }
 
 // standard14Font implements Font for layout measurement of Adobe 14 fonts
@@ -73,7 +72,6 @@ type standard14Font struct {
 	name    string
 	metrics Metrics
 	widths  map[rune]int
-	kern    map[runepair]int
 }
 
 // NewStandard14Font returns a Font backed by the AFM width tables for the

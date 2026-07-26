@@ -11,8 +11,6 @@ type Metrics struct {
 	ItalicAngle float64
 }
 
-type runepair [2]rune
-
 type Font interface {
 	// return stored font name
 	FontName() string

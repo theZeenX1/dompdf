@@ -1,9 +1,11 @@
-package dom
+package paragraph
 
 import (
 	"fmt"
 	"math"
 	"strings"
+
+	"github.com/theZeenX1/dompdf/internal/v0/dom"
 )
 
 const (
@@ -26,10 +28,10 @@ const (
 
 // textRun is a struct to hold a string without whitespaces or break-points with a common style
 type textRun struct {
-	x, y  float64 // x -> left edge of the word box, y -> height from the baseline (baseline + asc of the font)
-	width float64 // width of the run
-	style *Style  // style
-	text  string  // word
+	x, y  float64    // x -> left edge of the word box, y -> height from the baseline (baseline + asc of the font)
+	width float64    // width of the run
+	style *dom.Style // style
+	text  string     // word
 }
 
 type kpNode struct {
@@ -58,6 +60,7 @@ type kpBreakPoint struct {
 	parent           *kpBreakPoint // the parent for the current node / previous break point
 	fitnessClass     int           // fitness of the line
 	line             int           // line number / index
+	lineHeight       float64       // line height for the current breakpoint-parent pair
 	ratio            float64       // adjustment ratio of the line ending at the current break point
 	demerits         float64       // total demerits of the line
 	sumW, sumY, sumZ float64       // width, stretch, shrink
@@ -75,14 +78,14 @@ type line struct {
 	runs       []*textRun
 }
 
-func (p *ParagraphNode) createKpNodes() ([]kpNode, error) {
+func createKpNodes(p *dom.ParagraphNode) ([]kpNode, error) {
 	// store all nodes for kp algorithm
 	nodes := []kpNode{}
 	// store current run details:z
 	currentRuns := []*textRun{}
 	var currentRun []rune
 	currRunWidth, currRunsWidth, currentHeight, currentAsc := 0., 0., 0., 0.
-	var currentStyle *Style
+	var currentStyle *dom.Style
 
 	flushRun := func() {
 		if len(currentRun) == 0 {
@@ -140,7 +143,7 @@ func (p *ParagraphNode) createKpNodes() ([]kpNode, error) {
 	}
 
 	if p.Hyphenation {
-		var newFragments []TextNode
+		var newFragments []dom.TextNode
 		for _, frag := range p.Fragments {
 			words := strings.Split(frag.Text, " ")
 			var newText strings.Builder
@@ -154,14 +157,12 @@ func (p *ParagraphNode) createKpNodes() ([]kpNode, error) {
 					newText.WriteRune(' ')
 				}
 			}
-			newFragments = append(newFragments, TextNode{
-				layoutBox:    frag.layoutBox,
-				nodePointers: frag.nodePointers,
-				style:        frag.style,
 
-				Text:     newText.String(),
-				LangCode: frag.LangCode,
-			})
+			newFrag := frag
+			newFrag.Text = newText.String()
+			newFrag.LangCode = frag.LangCode
+
+			newFragments = append(newFragments, newFrag)
 		}
 		p.Fragments = newFragments
 
@@ -171,11 +172,16 @@ func (p *ParagraphNode) createKpNodes() ([]kpNode, error) {
 		// on a new fragment, flush the previous run:
 		flushRun()
 		// set current style
-		currentStyle = &frag.style
+		tmpStyle := frag.Style()
+		currentStyle = &tmpStyle
 
-		fs := frag.style.FontStyle
-		fsize := float64(frag.style.FontSize)
-		font, ok := frag.style.Font.Fmap[fs]
+		fs := frag.Style().FontStyle
+		fsize := frag.Style().FontSize
+		fraglhm := frag.Style().LineHeight // frag line-height multiplier
+		if fraglhm == 0 {
+			fraglhm = 1
+		}
+		font, ok := frag.Style().Font.Fmap[fs]
 		if !ok {
 			return nil, fmt.Errorf("no font found in fmap for font style: %d", fs)
 		}
@@ -190,11 +196,14 @@ func (p *ParagraphNode) createKpNodes() ([]kpNode, error) {
 
 		for _, r := range frag.Text {
 			// store the max height, asc for each run
-			currentAsc = max(currentAsc, frag.style.LineHeight*float64(font.Metrics().Ascender)*fsize/unitsPerEm)
+			currentAsc = max(
+				currentAsc,
+				fraglhm*frag.Style().LineHeight*float64(font.Metrics().Ascender)*fsize/unitsPerEm,
+			)
 			// lineHeight = LineGap + Ascender + abs(Descender)
 			currentHeight = max(
 				currentHeight,
-				frag.style.LineHeight*(float64(font.Metrics().LineGap+font.Metrics().Ascender)+math.Abs(float64(font.Metrics().Descender)))*fsize/unitsPerEm,
+				fraglhm*frag.Style().LineHeight*(float64(font.Metrics().LineGap+font.Metrics().Ascender)+math.Abs(float64(font.Metrics().Descender)))*fsize/unitsPerEm,
 			)
 
 			rw := 0.
@@ -250,7 +259,10 @@ func (p *ParagraphNode) createKpNodes() ([]kpNode, error) {
 // active nodes represents the set of all plausible break-points that are considered valid by the algorithm
 // if this set is empty (i.e., no break-point is found), we go for the node with the least demerits
 // if an overfull break-point is also not possible, then the algorithm panics and exits
-func (p *ParagraphNode) kpMainLoop(
+func kpMainLoop(
+	ctx *dom.LayoutContext,
+	p *dom.ParagraphNode,
+	nodeHeightsST []float64,
 	b int, nodes []kpNode,
 	sumW, sumY, sumZ float64,
 	activeNodes *kpLinkedList,
@@ -264,6 +276,7 @@ func (p *ParagraphNode) kpMainLoop(
 			break
 		}
 
+		// list of all possible parents with least demerits for the given class
 		candidates := []kpCandidate{{demerits: kpInfinity}, {demerits: kpInfinity}, {demerits: kpInfinity}, {demerits: kpInfinity}}
 		D := kpInfinity
 
@@ -274,9 +287,22 @@ func (p *ParagraphNode) kpMainLoop(
 			nextA := a.next
 
 			// line width from a -> b
-			// TODO: try to use LayoutContext to get the current line width somehow?
 			La_b := sumW - a.data.sumW
-			L := p.layoutBox.Width - (p.style.Padding.Left + p.style.Padding.Right)
+			// actual width available (L)
+			// checks the current cursor position for the line a->b and then checks if paragraphs width fits or not
+			var prevY float64
+			if a.data.index >= 0 {
+				prevY = a.data.lineHeight
+			} else {
+				prevY = p.LayoutBox().Y
+			}
+			currLineH, ok := querySegmentTree(&nodeHeightsST, len(nodes), max(0, a.data.index+1), b)
+			if !ok {
+				// fallback to zero
+				currLineH = 0
+			}
+			pageWidthAtCurrentPosition := dom.GetCurrentPageWidth(ctx, prevY+currLineH)
+			L := min(pageWidthAtCurrentPosition, p.LayoutBox().Width) - (p.Style().Padding.Left + p.Style().Padding.Right)
 			if p.ParagraphIndent != 0 && a.data.line != 0 {
 				L -= float64(p.ParagraphIndent)
 			}
@@ -393,11 +419,22 @@ func (p *ParagraphNode) kpMainLoop(
 			for fitnessClass := 0; fitnessClass < len(candidates); fitnessClass++ {
 				candidate := candidates[fitnessClass]
 				if candidate.demerits < kpInfinity {
+					var prevY float64
+					if candidate.active.index >= 0 {
+						prevY = candidate.active.lineHeight
+					} else {
+						prevY = p.LayoutBox().Y
+					}
+					currLineH, ok := querySegmentTree(&nodeHeightsST, len(nodes), max(0, candidate.active.index+1), b)
+					if !ok {
+						currLineH = 0
+					}
 					newActiveNode := &kpBreakPoint{
 						index:        b,
 						parent:       candidate.active,
 						fitnessClass: fitnessClass,
 						line:         candidate.active.line + 1,
+						lineHeight:   prevY + currLineH,
 						demerits:     candidate.demerits,
 						ratio:        candidate.ratio,
 						sumW:         sumW + w,
@@ -427,12 +464,14 @@ func (p *ParagraphNode) kpMainLoop(
 	}
 }
 
-func (p *ParagraphNode) kpLineBreak(ctx LayoutContext) ([]*line, error) {
+func KpLineBreak(p *dom.ParagraphNode, ctx *dom.LayoutContext) ([]*line, error) {
 	// create kp nodes:
-	nodes, err := p.createKpNodes()
+	nodes, err := createKpNodes(p)
 	if err != nil {
 		return nil, err
 	}
+
+	nodeHeightsST := createSegmentTree(&nodes)
 
 	sumW, sumY, sumZ := 0., 0., 0.
 
@@ -453,13 +492,13 @@ func (p *ParagraphNode) kpLineBreak(ctx LayoutContext) ([]*line, error) {
 			sumW += nodes[b].width
 		} else if nodes[b].t == tglue {
 			if b > 0 && nodes[b-1].t == tbox {
-				p.kpMainLoop(b, nodes, sumW, sumY, sumZ, activeNodes)
+				kpMainLoop(ctx, p, nodeHeightsST, b, nodes, sumW, sumY, sumZ, activeNodes)
 			}
 			sumW += nodes[b].width
 			sumY += nodes[b].y
 			sumZ += nodes[b].z
 		} else if nodes[b].t == tpenalty && nodes[b].penalty != kpInfinity {
-			p.kpMainLoop(b, nodes, sumW, sumY, sumZ, activeNodes)
+			kpMainLoop(ctx, p, nodeHeightsST, b, nodes, sumW, sumY, sumZ, activeNodes)
 		}
 	}
 
@@ -485,7 +524,7 @@ func (p *ParagraphNode) kpLineBreak(ctx LayoutContext) ([]*line, error) {
 	// breaks[i].index gives you the node index of each breakpoint
 	lines := []*line{}
 	// cursor x, y
-	cx, cy := (p.layoutBox.X + p.style.Padding.Left), (p.layoutBox.Y + p.style.Padding.Top)
+	cx, cy := (p.LayoutBox().X + p.Style().Padding.Left), (p.LayoutBox().Y + p.Style().Padding.Top)
 	if p.ParagraphIndent != 0 {
 		cx += float64(p.ParagraphIndent)
 	}
@@ -513,7 +552,7 @@ func (p *ParagraphNode) kpLineBreak(ctx LayoutContext) ([]*line, error) {
 			case tbox:
 				for _, run := range nodes[j].runs {
 					font := run.style.Font.Fmap[run.style.FontStyle]
-					fasc := float64(font.Metrics().Ascender) * float64(run.style.FontSize) / float64(font.Metrics().UnitsPerEm)
+					fasc := float64(font.Metrics().Ascender) * run.style.FontSize / float64(font.Metrics().UnitsPerEm)
 					// ascent is the height from the baseline to the top of the tallest character
 					// therefore for a common baseline in a line,
 					// we subtract maxAsc from the "cy" to get the common baseline for the line
@@ -542,9 +581,9 @@ func (p *ParagraphNode) kpLineBreak(ctx LayoutContext) ([]*line, error) {
 						hyphenW, ok := font.GlyphAdvancedWidth('-')
 						hyphenWidth := 0.
 						if ok {
-							hyphenWidth = float64(hyphenW) * float64(lastRun.style.FontSize) / unitsPerEm
+							hyphenWidth = float64(hyphenW) * lastRun.style.FontSize / unitsPerEm
 						}
-						fasc := float64(font.Metrics().Ascender) * float64(lastRun.style.FontSize) / unitsPerEm
+						fasc := float64(font.Metrics().Ascender) * lastRun.style.FontSize / unitsPerEm
 						runs = append(runs, &textRun{
 							x:     cx,
 							y:     cy - maxAsc + fasc,
@@ -555,24 +594,79 @@ func (p *ParagraphNode) kpLineBreak(ctx LayoutContext) ([]*line, error) {
 					}
 				}
 			}
-
-			lines = append(lines, &line{
-				x:          lx,
-				y:          ly,
-				maxAsc:     maxAsc,
-				lineHeight: maxHeight,
-				runs:       runs,
-			})
-
-			// increment cy by maxHeight
-			cy += maxHeight
-
-			// reset cursor x
-			cx = (p.layoutBox.X + p.style.Padding.Left)
 		}
+
+		lines = append(lines, &line{
+			x:          lx,
+			y:          ly,
+			maxAsc:     maxAsc,
+			lineHeight: maxHeight,
+			runs:       runs,
+		})
+
+		// increment cy by maxHeight
+		cy += maxHeight
+
+		// reset cursor x
+		cx = (p.LayoutBox().X + p.Style().Padding.Left)
 	}
 
 	return lines, nil
+}
+
+// ! utility functions for querying heights:
+
+func createSegmentTree(nodes *[]kpNode) []float64 {
+	n := len(*nodes)
+	stlen := len(*nodes) * 4
+	st := make([]float64, stlen)
+	createSTHelper(nodes, &st, 0, n-1, 0)
+	return st
+}
+
+func createSTHelper(nodes *[]kpNode, st *[]float64, ss, se, si int) float64 {
+	if ss > se {
+		return -1
+	}
+	if ss == se {
+		(*st)[si] = (*nodes)[ss].height
+		return (*st)[si]
+	}
+	smid := ss + ((se - ss) >> 1)
+	(*st)[si] = max(
+		createSTHelper(nodes, st, ss, smid, si*2+1),
+		createSTHelper(nodes, st, smid+1, se, si*2+2),
+	)
+	return (*st)[si]
+}
+
+func querySegmentTree(st *[]float64, nodesLen, l, r int) (float64, bool) {
+	if l > r || l < 0 || r > nodesLen {
+		return -1, false
+	}
+	return querySTHelper(st, l, r, 0, len(*st)-1, 0)
+}
+
+func querySTHelper(st *[]float64, l, r, ss, se, si int) (float64, bool) {
+	if se < l || ss > r {
+		return 0, false
+	}
+	if l <= ss && se <= r {
+		return (*st)[si], true
+	}
+	smid := ss + ((se - ss) >> 1)
+	lv, lok := querySTHelper(st, l, r, ss, smid, 2*si+1)
+	rv, rok := querySTHelper(st, l, r, smid+1, se, 2*si+2)
+	switch {
+	case lok && rok:
+		return max(lv, rv), true
+	case lok:
+		return lv, true
+	case rok:
+		return rv, true
+	default:
+		return 0, false
+	}
 }
 
 // ! utility functions for linked list:

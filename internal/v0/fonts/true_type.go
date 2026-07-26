@@ -129,7 +129,6 @@ type TrueTypeFont struct {
 	hmtxTbl    hmtxTbl
 	numGlyphs  int
 	usedRunes  map[rune]bool
-	kern       map[runepair]int
 }
 
 // TTF interfaces:

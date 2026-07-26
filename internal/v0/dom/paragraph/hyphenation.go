@@ -1,4 +1,4 @@
-package dom
+package paragraph
 
 import (
 	"embed"
@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/theZeenX1/dompdf/internal/v0/dom"
 )
 
 // Trie Node struct
@@ -35,13 +37,13 @@ type hyphenationPatternFileMetrics struct {
 var hyphenPatternsFS embed.FS
 
 // cached trie roots for langCodes
-var langCodeTrieCache map[LangCode]*liangTrieNode
+var langCodeTrieCache map[dom.LangCode]*liangTrieNode
 
 // cached exceptions for langCodes
 // also includes already parsed words
-var hyphenationMetricsCache map[LangCode]*hyphenationPatternFileMetrics
+var hyphenationMetricsCache map[dom.LangCode]*hyphenationPatternFileMetrics
 
-func hyphenateWord(word string, langCode LangCode) (string, error) {
+func hyphenateWord(word string, langCode dom.LangCode) (string, error) {
 	var trie *liangTrieNode
 	trie, ok := langCodeTrieCache[langCode]
 	if !ok {
@@ -161,7 +163,7 @@ func createLiangHyphenTrie(lp *hyphenationPatternFile) *liangTrieNode {
 }
 
 // read hyphenation pattern file
-func readHyphenationPatternFile(langCode LangCode) (*hyphenationPatternFile, error) {
+func readHyphenationPatternFile(langCode dom.LangCode) (*hyphenationPatternFile, error) {
 	fpath := filepath.Join("hyphen-patterns", string(langCode))
 
 	fbytes, err := hyphenPatternsFS.ReadFile(fpath)
