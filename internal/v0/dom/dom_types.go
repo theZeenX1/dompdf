@@ -31,11 +31,11 @@ type DOMPage struct {
 }
 
 type LayoutContext struct {
-	CurrentPageNo    int
-	CurrentNodeId    int
-	CursorX, CursorY float64
-	Pages            []*DOMPage
-	ElementCache     map[int]*DOMElement
+	CurrentNodeId    int                 // node id of the current element
+	CursorX, CursorY float64             // current cursor positions
+	Pages            []*DOMPage          // list of pages
+	Root             *DOMElement         // root entrance to the canvas
+	ElementCache     map[int]*DOMElement // cache of node id -> DOMElement
 }
 
 type ElementBorder struct {

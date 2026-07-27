@@ -14,3 +14,11 @@ type ImageIR struct{}
 type AnnotationIR struct{}
 
 type ShapeIR struct{}
+
+// this is what the Layout() function should output?
+type IRSet struct {
+	TextIRs      []TextIR
+	ImageIR      []ImageIR
+	AnnotationIR []AnnotationIR
+	ShapeIR      []ShapeIR
+}
