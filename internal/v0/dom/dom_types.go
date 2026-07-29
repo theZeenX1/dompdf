@@ -7,8 +7,15 @@ import (
 )
 
 type DOMElement interface {
-	// justify itself in the page and set the coordinates, height, etc.
-	Layout(ctx LayoutContext)
+	// (e *DOMElement) Layout(ctx LayoutContext, parentBox LayoutBox)
+	// calculates the height, width of the current element (e)
+	// and sets the cursor position on the basis of DisplayType
+	//
+	// ctx -> layout context while laying the elements
+	//
+	// parentBox -> determined height, width and cursor positions
+	// for the current element calculated by the parent (margins subtracted)
+	Layout(ctx *LayoutContext, parentBox LayoutBox)
 	//
 	LayoutBox() LayoutBox
 	//
@@ -31,7 +38,6 @@ type DOMPage struct {
 }
 
 type LayoutContext struct {
-	CurrentNodeId    int                 // node id of the current element
 	CursorX, CursorY float64             // current cursor positions
 	Pages            []*DOMPage          // list of pages
 	Root             *DOMElement         // root entrance to the canvas
@@ -185,10 +191,10 @@ type ParagraphNode struct {
 	Fragments []TextNode
 }
 
-func (p *ParagraphNode) Layout(ctx LayoutContext)   {}
-func (p *ParagraphNode) NodePointers() NodePointers { return p.nodePointers }
-func (p *ParagraphNode) LayoutBox() LayoutBox       { return p.layoutBox }
-func (p *ParagraphNode) Style() Style               { return p.style }
+func (p *ParagraphNode) Layout(ctx *LayoutContext, parentBox LayoutBox) {}
+func (p *ParagraphNode) NodePointers() NodePointers                     { return p.nodePointers }
+func (p *ParagraphNode) LayoutBox() LayoutBox                           { return p.layoutBox }
+func (p *ParagraphNode) Style() Style                                   { return p.style }
 
 // AnnotationNode wraps around the child,
 // along the borders to create an annotation box
@@ -209,10 +215,10 @@ type TextNode struct {
 	Text     string
 }
 
-func (t *TextNode) Layout(ctx LayoutContext)   {}
-func (t *TextNode) NodePointers() NodePointers { return t.nodePointers }
-func (t *TextNode) LayoutBox() LayoutBox       { return t.layoutBox }
-func (t *TextNode) Style() Style               { return t.style }
+func (t *TextNode) Layout(ctx *LayoutContext, parentBox LayoutBox) {}
+func (t *TextNode) NodePointers() NodePointers                     { return t.nodePointers }
+func (t *TextNode) LayoutBox() LayoutBox                           { return t.layoutBox }
+func (t *TextNode) Style() Style                                   { return t.style }
 
 type ImageNode struct {
 	layoutBox    LayoutBox
@@ -222,7 +228,7 @@ type ImageNode struct {
 	image.Image
 }
 
-func (i *ImageNode) Layout(ctx LayoutContext)   {}
-func (i *ImageNode) NodePointers() NodePointers { return i.nodePointers }
-func (i *ImageNode) LayoutBox() LayoutBox       { return i.layoutBox }
-func (i *ImageNode) Style() Style               { return i.style }
+func (i *ImageNode) Layout(ctx *LayoutContext, parentBox LayoutBox) {}
+func (i *ImageNode) NodePointers() NodePointers                     { return i.nodePointers }
+func (i *ImageNode) LayoutBox() LayoutBox                           { return i.layoutBox }
+func (i *ImageNode) Style() Style                                   { return i.style }
